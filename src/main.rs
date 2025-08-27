@@ -4,15 +4,15 @@ extern crate alloc;
 mod cli;
 use cli::cli;
 
-use aws_config::BehaviorVersion;
-use aws_config::stalled_stream_protection::StalledStreamProtectionConfig;
-use aws_sdk_ec2::types::{Filter, Tag};
-use tokio::time;
 use alloc::string::{String, ToString};
 use alloc::vec;
 use alloc::vec::Vec;
+use aws_config::BehaviorVersion;
+use aws_config::stalled_stream_protection::StalledStreamProtectionConfig;
+use aws_sdk_ec2::types::{Filter, Tag};
 #[cfg(feature = "tracing")]
 use log::{error, info, trace};
+use tokio::time;
 
 #[tokio::main]
 async fn main() {
@@ -31,11 +31,9 @@ async fn main() {
         .timeout_config(timeout_config)
         .stalled_stream_protection(
             StalledStreamProtectionConfig::enabled()
-                .grace_period(
-                    time::Duration::from_secs(600)
-                )
+                .grace_period(time::Duration::from_secs(600))
                 .is_enabled(true)
-                .build()
+                .build(),
         )
         .load()
         .await;
@@ -63,21 +61,20 @@ async fn add_tag_to_instance(client: &aws_sdk_ec2::Client, tag: &Tag, instance_i
     }
 }
 async fn add_tags_to_all_instances(client: &aws_sdk_ec2::Client, drp_tier: &str) {
-    let instance_id_vec = match get_all_instances(client).await{
+    let instance_id_vec = match get_all_instances(client).await {
         Some(a) => a,
         None => {
-        //    eprintln!("No instances found");
+            //    eprintln!("No instances found");
             return;
         }
     };
     let tag = Tag::builder().key("DRPBackupPlan").value(drp_tier).build();
-    for instance_id in instance_id_vec{
+    for instance_id in instance_id_vec {
         add_tag_to_instance(client, &tag, &instance_id).await;
     }
     // instance_id_vec.par_iter().for_each(|instance_id| {
     //     let _ = add_tag_to_instance(client, &tag, &instance_id);
     // })
-
 }
 
 async fn get_all_tags(client: &aws_sdk_ec2::Client) {
@@ -114,15 +111,15 @@ async fn get_all_instances(client: &aws_sdk_ec2::Client) -> Option<Vec<String>> 
         .describe_instances()
         .into_paginator()
         .page_size(5)
-    .send();
+        .send();
 
     while let Some(output) = request.next().await {
-
         let output = match output {
             Ok(output) => output,
             Err(e) => {
                 //eprintln!("{:?}", e);
-                continue;}
+                continue;
+            }
         };
 
         let reservations = output.reservations?;
@@ -135,7 +132,7 @@ async fn get_all_instances(client: &aws_sdk_ec2::Client) -> Option<Vec<String>> 
         }
     }
     if instance_id_vec.is_empty() {
-        return None
+        return None;
     }
     Some(instance_id_vec)
 }
