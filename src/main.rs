@@ -1,3 +1,6 @@
+#![no_std]
+extern crate alloc;
+
 mod cli;
 use cli::cli;
 
@@ -5,6 +8,10 @@ use aws_config::BehaviorVersion;
 use aws_config::stalled_stream_protection::StalledStreamProtectionConfig;
 use aws_sdk_ec2::types::{Filter, Tag};
 use tokio::time;
+use alloc::string::{String, ToString};
+use alloc::vec;
+use alloc::vec::Vec;
+#[cfg(feature = "tracing")]
 use log::{error, info, trace};
 
 #[tokio::main]
@@ -12,6 +19,7 @@ async fn main() {
     let matches = cli().get_matches();
     let profile = matches.get_one::<String>("profile").unwrap();
     let drp_tier = matches.get_one::<String>("drp-tier").unwrap();
+    #[cfg(feature = "tracing")]
     tracing_subscriber::fmt::init();
     let timeout_config = aws_config::timeout::TimeoutConfig::builder()
         .connect_timeout(time::Duration::from_secs(10000))
@@ -35,6 +43,7 @@ async fn main() {
     add_tags_to_all_instances(&client, drp_tier).await;
 }
 async fn add_tag_to_instance(client: &aws_sdk_ec2::Client, tag: &Tag, instance_id: &str) {
+    #[cfg(feature = "tracing")]
     info!("about to edit: {:?}", instance_id);
     let a = client
         .create_tags()
@@ -44,9 +53,11 @@ async fn add_tag_to_instance(client: &aws_sdk_ec2::Client, tag: &Tag, instance_i
         .await;
     match a {
         Ok(a) => {
+            #[cfg(feature = "tracing")]
             info!("{:?}", a);
         }
         Err(e) => {
+            #[cfg(feature = "tracing")]
             error!("Error: {:?}", e);
         }
     }
@@ -55,7 +66,7 @@ async fn add_tags_to_all_instances(client: &aws_sdk_ec2::Client, drp_tier: &str)
     let instance_id_vec = match get_all_instances(client).await{
         Some(a) => a,
         None => {
-            eprintln!("No instances found");
+        //    eprintln!("No instances found");
             return;
         }
     };
@@ -86,11 +97,11 @@ async fn get_all_tags(client: &aws_sdk_ec2::Client) {
             Some(page) => match page {
                 Ok(tags) => {
                     for tag in tags.tags.unwrap_or_default() {
-                        println!("tag: {:?}", tag);
+                        //println!("tag: {:?}", tag);
                     }
                 }
                 Err(err) => {
-                    println!("Error: {:?}", err);
+                    //println!("Error: {:?}", err);
                 }
             },
             None => break,
@@ -109,7 +120,9 @@ async fn get_all_instances(client: &aws_sdk_ec2::Client) -> Option<Vec<String>> 
 
         let output = match output {
             Ok(output) => output,
-            Err(e) => {eprintln!("{:?}", e); continue;}
+            Err(e) => {
+                //eprintln!("{:?}", e);
+                continue;}
         };
 
         let reservations = output.reservations?;

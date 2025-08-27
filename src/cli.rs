@@ -1,3 +1,4 @@
+use alloc::string::String;
 use clap::{arg, Arg, Command};
 
 pub(super) fn cli() -> Command {
