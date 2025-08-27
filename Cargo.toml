@@ -4,13 +4,13 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-aws-config = { version = "1.8.5", default-features = false }
+aws-config = { version = "1.8.5" }
 tokio = { version = "1.47.1", features = ["tokio-macros", "rt", "rt-multi-thread", "macros", "time"] }
 aws-sdk-ec2 = { version = "1.162.0", default-features = false }
 #rayon = "1.11.0"
 clap = "4.5.46"
-tracing-subscriber = { version = "0.3.19", features = ["env-filter"], optional = true}
-log = { version = "0.4.27", optional = true }
+tracing-subscriber = { version = "0.3.19", features = ["env-filter", "fmt"], default-features = false, optional = true}
+log = { version = "0.4.27", optional = true , default-features = false }
 
 [features]
 default = []
@@ -18,3 +18,8 @@ tracing = ["tracing-subscriber", "log"]
 
 [profile.dev.package.aws-sdk-ec2]
 hint-mostly-unused = true
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
