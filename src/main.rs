@@ -19,7 +19,6 @@ use tokio::time;
 async fn main() {
     let matches = cli().get_matches();
     let profile = matches.get_one::<String>("profile").unwrap();
-    let drp_tier = matches.get_one::<String>("drp-tier").unwrap();
     #[cfg(feature = "tracing")]
     tracing_subscriber::fmt::init();
     let timeout_config = aws_config::timeout::TimeoutConfig::builder()
@@ -39,7 +38,28 @@ async fn main() {
         .load()
         .await;
     let client = aws_sdk_ec2::Client::new(&config);
-    add_tags_to_all_instances(&client, drp_tier).await;
+    match matches.subcommand() {
+        Some((subcommand, arg)) => {
+            match subcommand {
+                "all" => {
+                    todo!()
+                }
+                "instance" => {
+                    todo!()
+                }
+                "drp" => {
+                    let drp_tier = matches.get_one::<String>("drp-tier").unwrap();
+
+                    add_tags_to_all_instances(&client, drp_tier).await;
+
+                }
+                _ => {
+                    eprintln!("Not a valid command")
+                }
+            }
+        }
+        None => {eprintln!("No subcommand provided");}
+    }
 }
 async fn add_tag_to_instance(client: &aws_sdk_ec2::Client, tag: &Tag, instance_id: &str) {
     #[cfg(feature = "tracing")]
