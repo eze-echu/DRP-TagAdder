@@ -1,4 +1,5 @@
 extern crate alloc;
+extern crate core;
 
 mod cli;
 use cli::cli;
@@ -8,12 +9,15 @@ use alloc::vec;
 use alloc::vec::Vec;
 use aws_config::BehaviorVersion;
 use aws_config::stalled_stream_protection::StalledStreamProtectionConfig;
+use aws_sdk_ec2::error::SdkError;
 use aws_sdk_ec2::operation::RequestId;
-use aws_sdk_ec2::types::{Filter, Instance, Tag};
+use aws_sdk_ec2::types::{Instance, Tag};
 #[cfg(feature = "tracing")]
-use log::{error, info, trace};
-use std::cmp::Ordering;
+use log::{error, info};
 use tokio::time;
+use anyhow::Result;
+use thiserror::__private::AsDisplay;
+use thiserror::Error;
 
 #[tokio::main]
 async fn main() {
@@ -39,26 +43,31 @@ async fn main() {
         .await;
     let client = aws_sdk_ec2::Client::new(&config);
     match matches.subcommand() {
-        Some((subcommand, arg)) => {
-            match subcommand {
-                "all" => {
-                    todo!()
-                }
-                "instance" => {
-                    todo!()
-                }
-                "drp" => {
-                    let drp_tier = matches.get_one::<String>("drp-tier").unwrap();
+        Some((subcommand, arg)) => match subcommand.to_lowercase().as_str() {
+            "all" => {
+                arg.get_one::<String>("key").unwrap();
+                arg.get_one::<String>("value").unwrap();
+            }
+            "instance" => {
+                todo!()
+            }
+            "drp" => {
+                let drp_tier = arg.get_one::<String>("drp-tier").unwrap();
 
-                    add_tags_to_all_instances(&client, drp_tier).await;
-
-                }
-                _ => {
-                    eprintln!("Not a valid command")
+                match add_tags_to_all_instances(&client, drp_tier).await {
+                    Ok(_) => {}
+                    Err(e) => {
+                        eprintln!("{}", e);
+                    }
                 }
             }
+            _ => {
+                eprintln!("Not a valid command")
+            }
+        },
+        None => {
+            eprintln!("No subcommand provided");
         }
-        None => {eprintln!("No subcommand provided");}
     }
 }
 async fn add_tag_to_instance(client: &aws_sdk_ec2::Client, tag: &Tag, instance_id: &str) {
@@ -90,16 +99,20 @@ async fn add_tag_to_instance(client: &aws_sdk_ec2::Client, tag: &Tag, instance_i
         }
     }
 }
-async fn add_tags_to_all_instances(client: &aws_sdk_ec2::Client, drp_tier: &str) {
+async fn add_tags_to_all_instances(
+    client: &aws_sdk_ec2::Client,
+    drp_tier: &str,
+) -> Result<()> {
     let instances = match get_all_instances(client).await {
-        Some(instances_vec) => instances_vec,
-        None => {
+        Ok(instances_vec) => instances_vec,
+        Err(e) => {
             eprintln!("Error: No Instances to edit");
-            return;
+            return Err(e.into());
         }
     };
-    // let instance_id_vec = instances.iter().map(|i| i.instance_id().unwrap_or_default()).collect::<Vec<_>>();
-    // println!("You are about to edit these instances {:?}", instance_id_vec);
+    if instances.is_empty() {
+        return Err(NoInstancesError.into());
+    }
     let tag = Tag::builder().key("DRPBackupPlan").value(drp_tier).build();
     let instances = filter_instances_by_tag_presence(&instances, &tag, false);
 
@@ -107,12 +120,11 @@ async fn add_tags_to_all_instances(client: &aws_sdk_ec2::Client, drp_tier: &str)
     names.sort();
     println!("About to edit {} instances: {:#?}", instances.len(), names);
 
-    let a = get_all_instance_ids(&instances);
     for instance in instances {
         let Some(instance_id) = instance.instance_id() else {
             continue;
         };
-        println!("Adding Tag to instance {}", instance_id);
+        println!("Adding Tag to instance \"{}\" ({})", get_instance_name(&instance), instance_id);
         println!("Proceed? [y/N]");
         let mut user_response = String::new();
         std::io::stdin().read_line(&mut user_response).unwrap();
@@ -122,6 +134,7 @@ async fn add_tags_to_all_instances(client: &aws_sdk_ec2::Client, drp_tier: &str)
         }
         add_tag_to_instance(client, &tag, &instance_id).await;
     }
+    Ok(())
     // instance_id_vec.par_iter().for_each(|instance_id| {
     //     let _ = add_tag_to_instance(client, &tag, &instance_id);
     // })
@@ -132,7 +145,6 @@ fn filter_instances_by_tag_presence(
     present: bool,
 ) -> Vec<Instance> {
     instances
-        .to_vec()
         .into_iter()
         .filter(|i| {
             i.tags()
@@ -142,40 +154,10 @@ fn filter_instances_by_tag_presence(
                 .contains(&tag.key().unwrap_or_default())
                 == present
         })
-        .to_owned()
-        .clone()
+        .map(|i| i.to_owned())
         .collect::<Vec<_>>()
 }
-
-async fn get_all_tags(client: &aws_sdk_ec2::Client) {
-    let filter = Filter::builder()
-        .name("resource-type".to_string())
-        .values("instance".to_string())
-        .build();
-    let mut response = client
-        .describe_tags()
-        .filters(filter)
-        .into_paginator()
-        .page_size(5)
-        .send();
-
-    loop {
-        match response.next().await {
-            Some(page) => match page {
-                Ok(tags) => {
-                    for tag in tags.tags.unwrap_or_default() {
-                        println!("tag: {:?}", tag);
-                    }
-                }
-                Err(err) => {
-                    println!("Error: {:?}", err);
-                }
-            },
-            None => break,
-        }
-    }
-}
-fn get_all_instance_ids(instances: &[Instance]) -> Option<Vec<String>> {
+fn _get_all_instance_ids(instances: &[Instance]) -> Option<Vec<String>> {
     instances
         .into_iter()
         .map(|i| i.instance_id.clone())
@@ -183,38 +165,77 @@ fn get_all_instance_ids(instances: &[Instance]) -> Option<Vec<String>> {
 }
 fn get_all_instance_names(instances: &[Instance]) -> Option<Vec<String>> {
     let mut names = vec![];
-    for instance in instances {
-        instance
-            .tags()
-            .iter()
-            .filter(|t| t.key() == Some("Name"))
-            .for_each(|t| names.push(t.value().unwrap().to_string()))
-    }
+    instances
+        .iter()
+        .map(|i| i.tags())
+        .flatten()
+        .filter(|&t| t.key().unwrap() == "Name")
+        .map(|t| t.value().unwrap().to_string())
+        .for_each(|t| names.push(t));
     Some(names)
 }
+fn get_instance_name(instance: &Instance) -> String {
+    instance
+        .tags()
+        .iter()
+        .filter(|t| t.key().unwrap() == "Name")
+        .map(|t| t.value().unwrap().to_string())
+        .collect::<Vec<_>>()
+        .first()
+        .unwrap()
+        .clone()
+}
 
-async fn get_all_instances(client: &aws_sdk_ec2::Client) -> Option<Vec<Instance>> {
-    let mut paginator = client
+async fn get_all_instances(
+    client: &aws_sdk_ec2::Client,
+) -> Result<Vec<Instance>> {
+    let paginator = client
         .describe_instances()
         .into_paginator()
         .page_size(5)
         .send();
-    let mut instances = vec![];
-    while let Some(output) = paginator.next().await {
-        let Ok(output) = output else {
-            eprintln!("Error while getting instance information: {:?}", output);
-            continue;
-        };
-        let reservations = output.reservations();
-        for reservation in reservations {
-            let instance_slice = reservation.instances();
-            instance_slice.iter().for_each(|instance| {
-                instances.push(instance.clone());
-            })
+    let mut instances: Vec<Instance> = vec![];
+    match paginator.try_collect().await {
+        Ok(instances_output) => {
+            instances_output
+                .iter()
+                .map(|dio| dio.reservations())
+                .flatten()
+                .map(|reservations| reservations.instances())
+                .flatten()
+                .for_each(|i| instances.push(i.clone()));
+        }
+        Err(e) => {
+            eprintln!("Error getting instances: {}", e);
+            match &e {
+                SdkError::ConstructionFailure(failure) => {
+                    eprintln!("Sdk Construction Failure: {:#?}", failure);
+                }
+                SdkError::TimeoutError(failure) => {
+                    eprintln!("Sdk Timeout Error: {:#?}", failure);
+                }
+                SdkError::DispatchFailure(failure) => {
+                    eprintln!(
+                        "Sdk Dispatch Failure (Probably expired token): {}",
+                        failure.as_connector_error().unwrap().as_display()
+                    );
+                }
+                SdkError::ResponseError(failure) => {
+                    eprintln!("Sdk Response Error: {:#?}", failure.raw());
+                }
+                SdkError::ServiceError(failure) => {
+                    eprintln!("Sdk Service Error: {:#?}", failure);
+                }
+                _ => {
+                    eprintln!("Sdk Error: {:#?}", e);
+                }
+            }
+            return Err(e.into());
         }
     }
-    if instances.is_empty() {
-        return None;
-    }
-    Some(instances)
+    Ok(instances)
 }
+
+#[derive(Error, Debug)]
+#[error("No Instances were found meeting the criteria")]
+struct NoInstancesError;
