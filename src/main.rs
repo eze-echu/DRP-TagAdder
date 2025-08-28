@@ -54,7 +54,7 @@ async fn main() {
             "drp" => {
                 let drp_tier = arg.get_one::<String>("drp-tier").unwrap();
 
-                match add_tags_to_all_instances(&client, drp_tier).await {
+                match add_drp_to_all_instances(&client, drp_tier).await {
                     Ok(_) => {}
                     Err(e) => {
                         eprintln!("{}", e);
@@ -99,9 +99,16 @@ async fn add_tag_to_instance(client: &aws_sdk_ec2::Client, tag: &Tag, instance_i
         }
     }
 }
+async fn add_drp_to_all_instances(client: &aws_sdk_ec2::Client, drp_tier: &str) -> Result<()> {
+    let tag = Tag::builder()
+        .key("DRPBackupPlan")
+        .value(drp_tier)
+    .build();
+    add_tags_to_all_instances(client, tag).await
+}
 async fn add_tags_to_all_instances(
     client: &aws_sdk_ec2::Client,
-    drp_tier: &str,
+    tag: Tag,
 ) -> Result<()> {
     let instances = match get_all_instances(client).await {
         Ok(instances_vec) => instances_vec,
@@ -110,12 +117,11 @@ async fn add_tags_to_all_instances(
             return Err(e.into());
         }
     };
+    let instances = filter_instances_by_tag_presence(&instances, &tag, false);
+
     if instances.is_empty() {
         return Err(NoInstancesError.into());
     }
-    let tag = Tag::builder().key("DRPBackupPlan").value(drp_tier).build();
-    let instances = filter_instances_by_tag_presence(&instances, &tag, false);
-
     let mut names = get_all_instance_names(&instances).unwrap();
     names.sort();
     println!("About to edit {} instances: {:#?}", instances.len(), names);
@@ -127,7 +133,7 @@ async fn add_tags_to_all_instances(
         println!("Adding Tag to instance \"{}\" ({})", get_instance_name(&instance), instance_id);
         println!("Proceed? [y/N]");
         let mut user_response = String::new();
-        std::io::stdin().read_line(&mut user_response).unwrap();
+        std::io::stdin().read_line(&mut user_response)?;
         if !user_response.starts_with("y") && !user_response.starts_with("Y") {
             println!("Skipping {}", instance_id);
             continue;
